@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0a0e1a" />
+  <title>Aether — UK Satnav</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --accent: #7dd3fc;
+      --accent-glow: #38bdf8;
+      --purple: #c084fc;
+      --text: #e0f2fe;
+      --muted: #94a3b8;
+      --card-bg: rgba(15, 23, 42, 0.78);
+      --glass: rgba(15, 23, 42, 0.55);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; width: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); user-select: none; }
+    #app { position: relative; width: 100%; height: 100%; }
+    #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    .top-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); background: linear-gradient(to bottom, rgba(10,14,26,0.85), transparent); pointer-events: none; }
+    .top-bar > * { pointer-events: auto; }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-mark { width: 32px; height: 32px; border-radius: 10px; background: linear-gradient(135deg, #38bdf8, #c084fc); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; color: #0a0e1a; box-shadow: 0 0 16px rgba(56,189,248,0.5); }
+    .logo-text strong { display: block; font-size: 15px; letter-spacing: 1.5px; font-weight: 700; }
+    .logo-text small { font-size: 11px; color: var(--muted); letter-spacing: 0.5px; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 12px; border: none; background: var(--glass); backdrop-filter: blur(12px); color: var(--text); font-size: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .icon-btn:active { background: rgba(56,189,248,0.25); }
+
+    .instruction-card { position: absolute; top: 70px; left: 16px; right: 16px; z-index: 10; display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: var(--card-bg); backdrop-filter: blur(20px); border-radius: 18px; border: 1px solid rgba(125,211,252,0.15); box-shadow: 0 8px 32px rgba(0,0,0,0.4); transition: opacity 0.3s, transform 0.3s; }
+    .instruction-card.hidden { opacity: 0; transform: translateY(-12px); pointer-events: none; }
+    .instruction-icon { width: 48px; height: 48px; border-radius: 14px; background: linear-gradient(135deg, rgba(56,189,248,0.25), rgba(192,132,252,0.25)); display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--accent); flex-shrink: 0; }
+    .instruction-text { flex: 1; min-width: 0; }
+    .distance { font-size: 20px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+    .maneuver { font-size: 15px; font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .street { font-size: 13px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .gauges { position: absolute; top: 160px; left: 16px; right: 16px; z-index: 10; display: flex; gap: 10px; transition: opacity 0.3s; }
+    .gauges.hidden { opacity: 0; pointer-events: none; }
+    .gauge { flex: 1; background: var(--card-bg); backdrop-filter: blur(16px); border-radius: 16px; padding: 10px 8px; text-align: center; border: 1px solid rgba(125,211,252,0.12); }
+    .gauge-label { font-size: 10px; letter-spacing: 1px; color: var(--muted); font-weight: 600; }
+    .gauge-value { font-size: 22px; font-weight: 700; margin: 2px 0; color: var(--text); }
+    .gauge-unit { font-size: 11px; color: var(--muted); }
+
+    .bottom-bar { position: absolute; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: flex-end; justify-content: space-between; padding: 16px 20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); background: linear-gradient(to top, rgba(10,14,26,0.9), transparent); pointer-events: none; }
+    .bottom-bar > * { pointer-events: auto; }
+    .orb-container { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .orb { width: 72px; height: 72px; border-radius: 50%; border: none; background: transparent; position: relative; cursor: pointer; padding: 0; }
+    .orb-inner { position: absolute; inset: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #e0f2fe, #38bdf8 40%, #0ea5e9 70%, #0369a1); box-shadow: 0 0 20px rgba(56,189,248,0.7), 0 0 40px rgba(56,189,248,0.4), inset 0 0 12px rgba(255,255,255,0.3); transition: transform 0.2s; }
+    .orb-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(125,211,252,0.4); animation: pulse-ring 2.5s ease-out infinite; }
+    .orb:active .orb-inner { transform: scale(0.92); }
+    @keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(1.35); opacity: 0; } }
+    .location-label { font-size: 12px; color: var(--muted); text-align: center; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .search-overlay { position: absolute; inset: 0; z-index: 30; background: rgba(10,14,26,0.92); backdrop-filter: blur(20px); display: flex; flex-direction: column; padding: 16px; padding-top: max(16px, env(safe-area-inset-top)); transition: opacity 0.25s; }
+    .search-overlay.hidden { opacity: 0; pointer-events: none; }
+    .search-box { display: flex; gap: 10px; margin-bottom: 16px; }
+    #search-input { flex: 1; height: 52px; border-radius: 16px; border: 1px solid rgba(125,211,252,0.25); background: rgba(15,23,42,0.8); color: var(--text); font-size: 16px; padding: 0 18px; outline: none; }
+    #search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,0.2); }
+    .search-results { list-style: none; flex: 1; overflow-y: auto; }
+    .search-results li { padding: 14px 16px; border-radius: 12px; margin-bottom: 6px; background: rgba(15,23,42,0.6); cursor: pointer; }
+    .search-results li:active { background: rgba(56,189,248,0.2); }
+    .search-results .name { font-weight: 600; font-size: 15px; }
+    .search-results .address { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 12px; }
+    .quick-btn { flex: 1; min-width: 70px; height: 44px; border-radius: 12px; border: 1px solid rgba(125,211,252,0.2); background: rgba(15,23,42,0.7); color: var(--text); font-size: 13px; cursor: pointer; }
+    .quick-btn:active { background: rgba(56,189,248,0.25); }
+
+    .toast { position: absolute; bottom: 140px; left: 50%; transform: translateX(-50%); z-index: 40; background: rgba(15,23,42,0.9); backdrop-filter: blur(12px); padding: 12px 20px; border-radius: 24px; font-size: 14px; border: 1px solid rgba(125,211,252,0.2); transition: opacity 0.3s; white-space: nowrap; max-width: 90%; text-align: center; }
+    .toast.hidden { opacity: 0; pointer-events: none; }
+
+    .loading { position: absolute; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+    .loading.hidden { display: none; }
+    .spinner { width: 48px; height: 48px; border: 3px solid rgba(56,189,248,0.2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .compliance-note { position: absolute; bottom: 110px; left: 16px; right: 16px; z-index: 9; font-size: 10px; color: var(--muted); text-align: center; opacity: 0.7; pointer-events: none; }
+
+    .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { display: none !important; }
+    .maplibregl-canvas { outline: none; }
+    .user-marker { width: 18px; height: 18px; border-radius: 50%; background: #38bdf8; border: 3px solid white; box-shadow: 0 0 12px rgba(56,189,248,0.8); }
+    .destination-marker { width: 28px; height: 28px; border-radius: 50% 50% 50% 0; background: linear-gradient(135deg, #c084fc, #38bdf8); transform: rotate(-45deg); box-shadow: 0 0 16px rgba(192,132,252,0.6); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="map"></div>
+
+    <header class="top-bar">
+      <div class="logo">
+        <span class="logo-mark">A</span>
+        <div class="logo-text">
+          <strong>AETHER</strong>
+          <small>UK Satnav · Highway Code aware</small>
+        </div>
+      </div>
+      <button id="menu-btn" class="icon-btn" aria-label="Info">ℹ</button>
+    </header>
+
+    <div id="instruction-card" class="instruction-card hidden">
+      <div class="instruction-icon" id="instruction-icon">→</div>
+      <div class="instruction-text">
+        <div class="distance" id="instruction-distance">—</div>
+        <div class="maneuver" id="instruction-maneuver">Searching route…</div>
+        <div class="street" id="instruction-street"></div>
+      </div>
+    </div>
+
+    <div id="gauges" class="gauges hidden">
+      <div class="gauge">
+        <div class="gauge-label">SPEED</div>
+        <div class="gauge-value" id="speed-value">0</div>
+        <div class="gauge-unit">mph</div>
+      </div>
+      <div class="gauge">
+        <div class="gauge-label">ETA</div>
+        <div class="gauge-value" id="eta-value">--:--</div>
+        <div class="gauge-unit" id="eta-remaining">—</div>
+      </div>
+      <div class="gauge">
+        <div class="gauge-label">LIMIT</div>
+        <div class="gauge-value" id="limit-value">—</div>
+        <div class="gauge-unit">mph</div>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <button id="map-style-btn" class="icon-btn" title="Day / Night">🗺️</button>
+      <div class="orb-container">
+        <button id="orb" class="orb" aria-label="Search">
+          <div class="orb-inner"></div>
+          <div class="orb-ring"></div>
+        </button>
+        <div id="location-label" class="location-label">Locating…</div>
+      </div>
+      <button id="mute-btn" class="icon-btn" title="Mute">🔊</button>
+    </div>
+
+    <div class="compliance-note">mph · UK rules · hands-free only · set destination while parked</div>
+
+    <div id="search-overlay" class="search-overlay hidden">
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="UK address, postcode or place…" autocomplete="off" />
+        <button id="search-close" class="icon-btn">✕</button>
+      </div>
+      <ul id="search-results" class="search-results"></ul>
+      <div class="quick-actions">
+        <button class="quick-btn" data-action="fuel">⛽ Fuel</button>
+        <button class="quick-btn" data-action="parking">🅿️ Parking</button>
+        <button class="quick-btn" data-action="clear">🗑️ Clear</button>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p>Initialising Aether for UK roads…</p>
+    </div>
+  </div>
+
+  <script>
+/**
+ * AETHER — UK Satnav (single-file)
+ * Highway Code aware design for Great Britain roads
+ * Units: mph | Routing: OSRM car profile (UK maxspeed tables) | Voice: en-GB
+ * Legal note: Hands-free only. Set destination while stationary. Obey all signs & Highway Code.
+ */
+
+const OSRM_URL = "https://router.project-osrm.org";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org";
+
+// UK national speed limits (cars) — Highway Code Rule 124
+const UK_NSL = {
+  builtUp: 30,      // England/Scotland (Wales default restricted = 20)
+  walesBuiltUp: 20,
+  single: 60,
+  dual: 70,
+  motorway: 70
+};
+
+let map = null;
+let userMarker = null;
+let destMarker = null;
+let watchId = null;
+let currentPosition = null;
+let currentRoute = null;
+let currentStepIndex = 0;
+let isNavigating = false;
+let isMuted = false;
+let voiceSynth = window.speechSynthesis;
+let lastSpoken = "";
+let estimatedLimit = null;
+
+const $ = (id) => document.getElementById(id);
+const instructionCard = $("instruction-card");
+const gauges = $("gauges");
+const searchOverlay = $("search-overlay");
+const searchInput = $("search-input");
+const searchResults = $("search-results");
+const locationLabel = $("location-label");
+const loading = $("loading");
+const toastEl = $("toast");
+
+function showToast(msg, ms = 2800) {
+  toastEl.textContent = msg;
+  toastEl.classList.remove("hidden");
+  setTimeout(() => toastEl.classList.add("hidden"), ms);
+}
+
+function formatDistance(metres) {
+  if (metres < 1000) return Math.round(metres) + " m";
+  return (metres / 1609.34).toFixed(1) + " mi";
+}
+
+function formatDuration(seconds) {
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return mins + " min";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h + "h " + m + "m";
+}
+
+function mphFromMs(ms) {
+  return Math.round((ms || 0) * 2.23694);
+}
+
+function speak(text) {
+  if (isMuted || !voiceSynth || text === lastSpoken) return;
+  lastSpoken = text;
+  voiceSynth.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang = "en-GB";
+  utt.rate = 1.05;
+  voiceSynth.speak(utt);
+}
+
+function initMap() {
+  map = new maplibregl.Map({
+    container: "map",
+    style: {
+      version: 8,
+      sources: {
+        osm: {
+          type: "raster",
+          tiles: [
+            "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          ],
+          tileSize: 256,
+          attribution: "© OpenStreetMap"
+        }
+      },
+      layers: [{ id: "osm", type: "raster", source: "osm", minzoom: 0, maxzoom: 19 }]
+    },
+    center: [-0.1276, 51.5074],
+    zoom: 12,
+    maxBounds: [[-10.5, 49.5], [2.5, 61.5]],
+    attributionControl: false
+  });
+
+  map.on("load", () => {
+    map.addSource("route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({
+      id: "route-glow", type: "line", source: "route",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#38bdf8", "line-width": 14, "line-opacity": 0.25, "line-blur": 8 }
+    });
+    map.addLayer({
+      id: "route-core", type: "line", source: "route",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#7dd3fc", "line-width": 5, "line-opacity": 0.95 }
+    });
+    map.addLayer({
+      id: "route-dash", type: "line", source: "route",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#e0f2fe", "line-width": 2, "line-opacity": 0.7, "line-dasharray": [0, 4, 2] }
+    });
+    loading.classList.add("hidden");
+    startGeolocation();
+  });
+
+  map.getCanvas().style.filter = "brightness(0.65) contrast(1.15) saturate(0.85)";
+}
+
+function startGeolocation() {
+  if (!navigator.geolocation) {
+    showToast("Geolocation not available");
+    locationLabel.textContent = "Location unavailable";
+    return;
+  }
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      currentPosition = {
+        lng: pos.coords.longitude,
+        lat: pos.coords.latitude,
+        speed: pos.coords.speed || 0,
+        heading: pos.coords.heading
+      };
+      updateUserMarker();
+      updateSpeedGauge();
+      reverseGeocode(currentPosition.lng, currentPosition.lat);
+      if (isNavigating && currentRoute) updateNavigationProgress();
+    },
+    (err) => {
+      console.warn(err);
+      locationLabel.textContent = "Waiting for GPS…";
+      if (!currentPosition) {
+        currentPosition = { lng: -0.1276, lat: 51.5074, speed: 0 };
+        updateUserMarker();
+      }
+    },
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+  );
+}
+
+function updateUserMarker() {
+  if (!currentPosition || !map) return;
+  const el = document.createElement("div");
+  el.className = "user-marker";
+  if (!userMarker) {
+    userMarker = new maplibregl.Marker({ element: el })
+      .setLngLat([currentPosition.lng, currentPosition.lat])
+      .addTo(map);
+  } else {
+    userMarker.setLngLat([currentPosition.lng, currentPosition.lat]);
+  }
+  if (isNavigating) {
+    map.easeTo({ center: [currentPosition.lng, currentPosition.lat], duration: 800 });
+  }
+}
+
+function updateSpeedGauge() {
+  $("speed-value").textContent = mphFromMs(currentPosition?.speed || 0);
+  // Simple UK limit heuristic when no better data
+  if (estimatedLimit) {
+    $("limit-value").textContent = estimatedLimit;
+  }
+}
+
+async function reverseGeocode(lng, lat) {
+  try {
+    const res = await fetch(
+      NOMINATIM_URL + "/reverse?format=json&lat=" + lat + "&lon=" + lng + "&zoom=16&addressdetails=1",
+      { headers: { "Accept-Language": "en-GB" } }
+    );
+    const data = await res.json();
+    const addr = data.address || {};
+    const parts = [addr.road || addr.pedestrian || addr.suburb, addr.city || addr.town || addr.village || addr.county].filter(Boolean);
+    locationLabel.textContent = parts.join(", ") || "United Kingdom";
+
+    // Basic built-up detection for 30 mph default
+    if (addr.city || addr.town || addr.suburb || addr.residential) {
+      estimatedLimit = 30; // England/Scotland default; Wales often 20
+      $("limit-value").textContent = "30";
+    }
+  } catch (e) {
+    locationLabel.textContent = "United Kingdom";
+  }
+}
+
+async function performSearch(query) {
+  if (!query || query.length < 2) {
+    searchResults.innerHTML = "";
+    return;
+  }
+  try {
+    const res = await fetch(
+      NOMINATIM_URL + "/search?format=json&q=" + encodeURIComponent(query) + "&countrycodes=gb&limit=8&addressdetails=1",
+      { headers: { "Accept-Language": "en-GB" } }
+    );
+    const results = await res.json();
+    searchResults.innerHTML = results.map(r =>
+      "<li data-lng=\"" + r.lon + "\" data-lat=\"" + r.lat + "\" data-name=\"" + r.display_name.replace(/"/g, "&quot;") + "\">" +
+      "<div class=\"name\">" + r.display_name.split(",")[0] + "</div>" +
+      "<div class=\"address\">" + r.display_name + "</div></li>"
+    ).join("");
+    searchResults.querySelectorAll("li").forEach(li => {
+      li.addEventListener("click", () => {
+        setDestination(parseFloat(li.dataset.lng), parseFloat(li.dataset.lat), li.dataset.name);
+        closeSearch();
+      });
+    });
+  } catch (e) {
+    showToast("Search failed — check connection");
+  }
+}
+
+function openSearch() {
+  searchOverlay.classList.remove("hidden");
+  searchInput.focus();
+  searchInput.value = "";
+  searchResults.innerHTML = "";
+}
+function closeSearch() {
+  searchOverlay.classList.add("hidden");
+}
+
+async function setDestination(lng, lat, name) {
+  if (!currentPosition) {
+    showToast("Waiting for GPS fix…");
+    return;
+  }
+  clearRoute();
+  const el = document.createElement("div");
+  el.className = "destination-marker";
+  destMarker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+  showToast("Calculating UK route…");
+
+  try {
+    // OSRM driving profile already incorporates UK maxspeed tables (gb:nsl_*)
+    const url = OSRM_URL + "/route/v1/driving/" +
+      currentPosition.lng + "," + currentPosition.lat + ";" + lng + "," + lat +
+      "?overview=full&geometries=geojson&steps=true&annotations=true";
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (data.code !== "Ok" || !data.routes?.length) {
+      showToast("No route found");
+      return;
+    }
+
+    const route = data.routes[0];
+    currentRoute = route;
+    isNavigating = true;
+    currentStepIndex = 0;
+
+    map.getSource("route").setData({
+      type: "Feature",
+      properties: {},
+      geometry: route.geometry
+    });
+
+    const coords = route.geometry.coordinates;
+    const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(bounds, { padding: 80, duration: 1200 });
+
+    instructionCard.classList.remove("hidden");
+    gauges.classList.remove("hidden");
+
+    updateInstruction(route.legs[0].steps[0]);
+    updateEta(route.duration, route.distance);
+
+    // UK-style first instruction
+    const first = route.legs[0].steps[0];
+    speak(first.maneuver?.instruction || "Start navigation");
+    showToast("Route ready · " + formatDistance(route.distance) + " · obey all signs");
+  } catch (e) {
+    console.error(e);
+    showToast("Routing error — try again");
+  }
+}
+
+function clearRoute() {
+  isNavigating = false;
+  currentRoute = null;
+  currentStepIndex = 0;
+  lastSpoken = "";
+  estimatedLimit = null;
+  $("limit-value").textContent = "—";
+  if (map.getSource("route")) {
+    map.getSource("route").setData({ type: "FeatureCollection", features: [] });
+  }
+  if (destMarker) { destMarker.remove(); destMarker = null; }
+  instructionCard.classList.add("hidden");
+  gauges.classList.add("hidden");
+}
+
+function updateInstruction(step) {
+  if (!step) return;
+  $("instruction-distance").textContent = formatDistance(step.distance || 0);
+
+  const type = step.maneuver?.type || "";
+  const modifier = step.maneuver?.modifier || "";
+  let icon = "→";
+  if (type === "arrive") icon = "🏁";
+  else if (type === "depart") icon = "↑";
+  else if (modifier.includes("left")) icon = "↰";
+  else if (modifier.includes("right")) icon = "↱";
+  else if (modifier.includes("uturn") || modifier.includes("u-turn")) icon = "↩";
+  else if (type === "roundabout" || type === "rotary") icon = "↻";
+
+  $("instruction-icon").textContent = icon;
+
+  // Prefer UK-friendly wording
+  let text = step.maneuver?.instruction || (type + " " + modifier).trim();
+  if (type === "roundabout" || type === "rotary") {
+    text = text.replace("roundabout", "roundabout (give way to traffic from the right)");
+  }
+  $("instruction-maneuver").textContent = text;
+  $("instruction-street").textContent = step.name || "";
+}
+
+function updateEta(durationSec) {
+  const now = new Date();
+  const eta = new Date(now.getTime() + durationSec * 1000);
+  $("eta-value").textContent = eta.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  $("eta-remaining").textContent = formatDuration(durationSec);
+}
+
+function updateNavigationProgress() {
+  if (!currentRoute || !currentPosition) return;
+  const steps = currentRoute.legs[0].steps;
+  let closestIdx = currentStepIndex;
+  let minDist = Infinity;
+
+  for (let i = currentStepIndex; i < Math.min(steps.length, currentStepIndex + 6); i++) {
+    const loc = steps[i].maneuver.location;
+    const d = haversine(currentPosition.lat, currentPosition.lng, loc[1], loc[0]);
+    if (d < minDist) { minDist = d; closestIdx = i; }
+  }
+
+  if (closestIdx !== currentStepIndex) {
+    currentStepIndex = closestIdx;
+    const step = steps[currentStepIndex];
+    updateInstruction(step);
+    if (step.distance < 280 && step.maneuver?.instruction) {
+      speak(step.maneuver.instruction);
+    }
+  }
+
+  const remainingSteps = steps.slice(currentStepIndex);
+  const remainingDur = remainingSteps.reduce((s, st) => s + (st.duration || 0), 0);
+  updateEta(remainingDur);
+
+  if (currentStepIndex >= steps.length - 1 && minDist < 35) {
+    speak("You have arrived at your destination");
+    showToast("Arrived — drive safely");
+  }
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180, Δλ = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function setupEvents() {
+  $("orb").addEventListener("click", openSearch);
+  $("search-close").addEventListener("click", closeSearch);
+
+  $("menu-btn").addEventListener("click", () => {
+    showToast("Aether respects UK Highway Code: mph units, OSRM UK speed tables, roundabout priority to the right, hands-free only. Always obey signs & road conditions.", 5000);
+  });
+
+  $("mute-btn").addEventListener("click", () => {
+    isMuted = !isMuted;
+    $("mute-btn").textContent = isMuted ? "🔇" : "🔊";
+    showToast(isMuted ? "Voice muted" : "Voice on (en-GB)");
+  });
+
+  $("map-style-btn").addEventListener("click", () => {
+    const canvas = map.getCanvas();
+    if (canvas.style.filter.includes("0.65")) {
+      canvas.style.filter = "brightness(1.05) contrast(1.05) saturate(1.1)";
+      showToast("Day mode");
+    } else {
+      canvas.style.filter = "brightness(0.65) contrast(1.15) saturate(0.85)";
+      showToast("Night / ethereal mode");
+    }
+  });
+
+  let searchTimeout;
+  searchInput.addEventListener("input", (e) => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => performSearch(e.target.value.trim()), 350);
+  });
+
+  document.querySelectorAll(".quick-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.action;
+      if (action === "clear") {
+        clearRoute();
+        closeSearch();
+        showToast("Route cleared");
+      } else if (action === "fuel") {
+        performSearch("petrol station");
+      } else if (action === "parking") {
+        performSearch("car park");
+      }
+    });
+  });
+
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeSearch();
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initMap();
+  setupEvents();
+});
+  </script>
+</body>
+</html>
