@@ -647,55 +647,63 @@
   function updateHUD() {
     if (!steps.length) return;
     const s = steps[stepIdx];
-    document.getElementById('arrow').textContent = s.arrow;
-    document.getElementById('instr').textContent = s.instruction;
-    document.getElementById('dist').textContent = s.distStr;
+    if (!s) return;
+    document.getElementById('arrow').textContent = s.arrow || '↑';
+    document.getElementById('instr').textContent = s.instruction || 'Continue';
+    document.getElementById('dist').textContent = s.distStr || '—';
   }
 
   function advanceStep() {
-    if (!steps.length || !pos) return;
+    if (!steps.length || !pos || lastSpeak === 'arrived') return;
 
     const s = steps[stepIdx];
     if (!s || !s.location) return;
 
     const d = dist(pos.lat, pos.lon, s.location[1], s.location[0]);
 
-    // Live distance update on HUD
+    // Live distance update on HUD only
     const distText = d >= 1000 ? (d/1000).toFixed(1) + ' km' : Math.round(d) + ' m';
     document.getElementById('dist').textContent = distText;
 
-    // Voice distance announcements at key points
-    if (voiceOn) {
-      if (d < 80 && lastAnnounceDist !== 50) {
+    // Voice announcements – only once per distance band, never repeat
+    if (voiceOn && lastSpeak !== 'arrived') {
+      if (d < 70 && lastAnnounceDist !== 50) {
         speak('In 50 metres. ' + cleanVoice(s.instruction));
         lastAnnounceDist = 50;
-      } else if (d < 180 && lastAnnounceDist !== 150) {
+      } else if (d < 160 && d >= 70 && lastAnnounceDist !== 150) {
         speak('In 150 metres. ' + cleanVoice(s.instruction));
         lastAnnounceDist = 150;
-      } else if (d < 350 && lastAnnounceDist !== 300) {
+      } else if (d < 320 && d >= 160 && lastAnnounceDist !== 300) {
         speak('In 300 metres. ' + cleanVoice(s.instruction));
         lastAnnounceDist = 300;
       }
     }
 
-    // Auto advance to next turn when close enough
-    if (d < 35 && stepIdx < steps.length - 1) {
+    // Auto advance to next turn
+    if (d < 40 && stepIdx < steps.length - 1) {
       stepIdx++;
       lastAnnounceDist = -1;
       updateHUD();
       const next = steps[stepIdx];
-      if (voiceOn && next) {
-        if (next.type === 'arrive') {
+      if (voiceOn && next && lastSpeak !== 'arrived') {
+        if (next.type === 'arrive' || stepIdx === steps.length - 1) {
           speak('You have arrived at your destination.');
+          lastSpeak = 'arrived';
+          document.getElementById('arrow').textContent = '●';
+          document.getElementById('instr').textContent = 'You have arrived';
+          document.getElementById('dist').textContent = '0 m';
         } else {
           speak('Now. ' + cleanVoice(next.instruction));
         }
       }
-    } else if (d < 25 && stepIdx === steps.length - 1) {
-      // Final arrival
-      if (voiceOn && lastSpeak !== 'arrived') {
-        speak('You have arrived at your destination.');
+    } else if (d < 30 && stepIdx >= steps.length - 1) {
+      // Final arrival – stop all further guidance
+      if (lastSpeak !== 'arrived') {
+        if (voiceOn) speak('You have arrived at your destination.');
         lastSpeak = 'arrived';
+        document.getElementById('arrow').textContent = '●';
+        document.getElementById('instr').textContent = 'You have arrived';
+        document.getElementById('dist').textContent = '0 m';
       }
     }
   }
@@ -730,9 +738,9 @@
 
   // ===== REAL OSM SPEED CAMERAS via Overpass API =====
   async function fetchNearbyCameras(lat, lon) {
-    // Only fetch every 60 seconds to respect Overpass usage
+    // Only fetch every 90 seconds to respect Overpass and avoid crashes
     const now = Date.now();
-    if (now - lastCameraFetch < 60000 && nearbyCameras.length) return;
+    if (now - lastCameraFetch < 90000 && nearbyCameras.length) return;
     lastCameraFetch = now;
 
     const radius = 1500; // metres
@@ -775,9 +783,9 @@
 
   // Current road name + better speed limit from OSM
   async function fetchRoadAndLimit() {
-    if (!pos) return;
+    if (!pos || lastSpeak === 'arrived') return;
     const now = Date.now();
-    if (now - lastRoadFetch < 12000) return; // throttle
+    if (now - lastRoadFetch < 18000) return; // stronger throttle to prevent overload
     lastRoadFetch = now;
 
     // Reverse geocode for road name (Nominatim)
@@ -888,19 +896,22 @@
   }
 
   function speak(t) {
-    if (!voiceOn || !window.speechSynthesis) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(t);
-    u.lang = 'en-GB';
-    u.rate = 1.0;
-    u.pitch = 1.0;
-    // Prefer a clear British voice
-    const voices = speechSynthesis.getVoices();
-    const gb = voices.find(v => v.lang === 'en-GB') ||
-               voices.find(v => v.lang.startsWith('en-GB')) ||
-               voices.find(v => v.name && (v.name.includes('British') || v.name.includes('UK') || v.name.includes('English')));
-    if (gb) u.voice = gb;
-    speechSynthesis.speak(u);
+    if (!voiceOn || !window.speechSynthesis || !t) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(t);
+      u.lang = 'en-GB';
+      u.rate = 1.0;
+      u.pitch = 1.0;
+      const voices = speechSynthesis.getVoices();
+      const gb = voices.find(v => v.lang === 'en-GB') ||
+                 voices.find(v => v.lang.startsWith('en-GB')) ||
+                 voices.find(v => v.name && (v.name.includes('British') || v.name.includes('UK') || v.name.includes('English')));
+      if (gb) u.voice = gb;
+      speechSynthesis.speak(u);
+    } catch (e) {
+      // Prevent speech errors from crashing the app
+    }
   }
 
   function toggleVoice() {
